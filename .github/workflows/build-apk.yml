@@ -32,16 +32,36 @@ jobs:
       - name: Setup Expo / EAS CLI
         run: npm install -g eas-cli
 
-      - name: Build APK via EAS
+      - name: Build APK via EAS and download
         working-directory: artifacts/school-diary
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          eas build \
+          BUILD_JSON=$(eas build \
             --platform android \
             --profile preview \
             --non-interactive \
-            --output ./school-diary.apk
+            --json \
+            --no-wait 2>/dev/null)
+          BUILD_ID=$(echo "$BUILD_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
+          echo "Build ID: $BUILD_ID"
+          echo "Waiting for build to finish..."
+          eas build:view "$BUILD_ID" --json > /dev/null
+          while true; do
+            STATUS=$(eas build:view "$BUILD_ID" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
+            echo "Status: $STATUS"
+            if [ "$STATUS" = "FINISHED" ]; then
+              APK_URL=$(eas build:view "$BUILD_ID" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('artifacts',{}).get('buildUrl',''))")
+              echo "APK URL: $APK_URL"
+              curl -L "$APK_URL" -o school-diary.apk
+              echo "Downloaded APK"
+              break
+            elif [ "$STATUS" = "ERRORED" ] || [ "$STATUS" = "CANCELED" ]; then
+              echo "Build failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 30
+          done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
