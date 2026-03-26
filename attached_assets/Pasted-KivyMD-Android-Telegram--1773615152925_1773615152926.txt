@@ -1,0 +1,881 @@
+KivyMD Android-приложение (переработка Telegram-бота)
+Разобью на несколько файлов для чистоты структуры. Ниже полный код.
+
+Структура проекта
+
+
+school_app/
+├── main.py
+├── data/
+│   └── (notes.json создаётся автоматически)
+└── buildozer.spec  (для сборки APK)
+main.py
+python
+
+
+import json
+import os
+import random
+import time
+from datetime import datetime, timedelta
+from kivy.clock import Clock
+from kivy.core.window import Window
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivymd.app import MDApp
+from kivymd.uix.bottomnavigation import MDBottomNavigation, MDBottomNavigationItem
+from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.button import MDRaisedButton, MDFlatButton, MDIconButton
+from kivymd.uix.card import MDCard
+from kivymd.uix.dialog import MDDialog
+from kivymd.uix.label import MDLabel
+from kivymd.uix.scrollview import MDScrollView
+from kivymd.uix.snackbar import Snackbar
+from kivymd.uix.textfield import MDTextField
+from kivymd.uix.toolbar import MDTopAppBar
+# ─────────────────────────────────────────────
+#  ДАННЫЕ (перенесены из бота)
+# ─────────────────────────────────────────────
+SCHEDULE = {
+    0: [
+        "Труды / 30", "Труды / 30", "Физика / 26",
+        "История Беларуси / 23", "Бел. Лит / 29", "География / 24"
+    ],
+    1: [
+        "Биология / 22", "Информатика / 11", "Физкультура / сп. зал",
+        "Алгебра / 16", "Немецкий язык / 20", "Физика / 32", "Астрономия / 32"
+    ],
+    2: [
+        "Труды / 30", "Труды / 30", "Алгебра / 32",
+        "Русская литература / 29", "Русский язык / 29", "Химия / 28", "Общество / 10"
+    ],
+    3: [
+        "Физкультура / сп. зал", "Труды / 30", "Труды / 30",
+        "Бел. Лит / 27", "Бел. Яз / 27", "Геометрия / 24", "Физкультура / сп. зал"
+    ],
+    4: [
+        "Русский язык / 29", "Биология / 22", "История Беларуси / 23",
+        "Физкультура / сп. зал", "Геометрия / 24", "Немецкий Язык / 20", "Химия / 28"
+    ],
+    5: [],
+    6: [],
+}
+DAY_NAMES = {
+    0: "Понедельник", 1: "Вторник", 2: "Среда",
+    3: "Четверг", 4: "Пятница", 5: "Суббота", 6: "Воскресенье"
+}
+DAY_EMOJIS = {
+    0: "📚", 1: "📖", 2: "📘", 3: "📗", 4: "📙", 5: "🎉", 6: "🎉"
+}
+SUBJECT_EMOJIS = {
+    "Труды": "🔨",
+    "Физика": "⚛️",
+    "История Беларуси": "🇧🇾📜",
+    "Бел. Лит": "📖🇧🇾",
+    "География": "🗺️",
+    "Биология": "🧬",
+    "Информатика": "💻",
+    "Физкультура": "🏃",
+    "Алгебра": "📐",
+    "Немецкий язык": "🇩🇪",
+    "Немецкий Язык": "🇩🇪",
+    "Астрономия": "🌌",
+    "Русская литература": "📚",
+    "Русский язык": "📝",
+    "Химия": "🧪",
+    "Общество": "👥",
+    "Бел. Яз": "✍️🇧🇾",
+    "Геометрия": "📏",
+}
+LESSON_START_HOUR = 8
+LESSON_START_MIN = 0
+LESSON_DURATION = 45   # минут
+BREAK_DURATION = 15    # минут
+PASSWORD = "checkerzxc"
+AUTH_MAX_ATTEMPTS = 3
+AUTH_BLOCK_TIME = 1800  # 30 минут
+VACATIONS = {
+    "Осенние":  {"start": datetime(2025, 11, 2),  "end": datetime(2025, 11, 9),  "days": 8},
+    "Зимние":   {"start": datetime(2025, 12, 25), "end": datetime(2026, 1, 7),   "days": 14},
+    "Весенние": {"start": datetime(2026, 3, 22),  "end": datetime(2026, 3, 29),  "days": 8},
+    "Летние":   {"start": datetime(2026, 6, 1),   "end": datetime(2026, 8, 31),  "days": 92},
+}
+SCORE_JOKES = {
+    1: ["🎲 1 балл\n\n📌 Один. Сегодня не твой день. Как двойка по математике, только в холодильнике.",
+        "🎲 1 балл\n\n📌 Единица. Кола закончилась, как твои аргументы у доски."],
+    2: ["🎲 2 балла\n\n📌 Двойка. Кола есть, но её на всех не хватит.",
+        "🎲 2 балла\n\n📌 Эх, два.. Кола тёплая и выпитая."],
+    3: ["🎲 3 балла\n\n📌 Кола без газа. Как выходной, который задали уроки.",
+        "🎲 3 балла\n\n📌 Тройка. Общая кола на троих."],
+    4: ["🎲 4 балла\n\n📌 Обычная кола. Как обычный день — без двоек и без праздников.",
+        "🎲 4 балла\n\n📌 Кола из дома. Надёжно, но не интересно."],
+    5: ["🎲 5 баллов\n\n📌 Пятёрка! Кола из холодильника после школы. Награда за выживание.",
+        "🎲 5 баллов\n\n📌 Холодная, своя, и никто не просит. Идеально."],
+    6: ["🎲 6 баллов\n\n📌 Большая бутылка на пару с другом.",
+        "🎲 6 баллов\n\n📌 Кола после физры. Кажется, спас жизнь."],
+    7: ["🎲 7 баллов\n\n📌 Вишнёвая кола. Либо твой вкус, либо «фу, какая гадость».",
+        "🎲 7 баллов\n\n📌 Кола, которую спрятал от младшего брата."],
+    8: ["🎲 8 баллов\n\n📌 Кола со льдом в жаркий день.",
+        "🎲 8 баллов\n\n📌 Запасная кола, которую забыл и нашёл."],
+    9: ["🎲 9 баллов\n\n📌 Ледяная кола после шести уроков. Лучше, чем пятёрка по химии.",
+        "🎲 9 баллов\n\n📌 Кола в день, когда учитель заболел."],
+    10: ["🎲 10 баллов! 🎉\n\n📌 Десять! Кола, которая ждала тебя дома в день, когда всё пошло по плану.",
+         "🎲 10 баллов! 🎉\n\n📌 Кола, которую ты выиграл в споре у учителя. Легенда школы."],
+}
+# ─────────────────────────────────────────────
+#  ЛОГИКА РАСПИСАНИЯ
+# ─────────────────────────────────────────────
+def get_now():
+    """Текущее местное время устройства."""
+    return datetime.now()
+def lesson_start_time(index: int) -> datetime:
+    """Время начала урока по его 0-индексу."""
+    base = datetime.now().replace(
+        hour=LESSON_START_HOUR, minute=LESSON_START_MIN, second=0, microsecond=0
+    )
+    return base + timedelta(minutes=index * (LESSON_DURATION + BREAK_DURATION))
+def lesson_end_time(index: int) -> datetime:
+    return lesson_start_time(index) + timedelta(minutes=LESSON_DURATION)
+def get_current_lesson_info():
+    """
+    Возвращает (status, lesson_index, lesson_str)
+    status: 'before_school' | 'lesson' | 'break' | 'after_school' | 'weekend'
+    """
+    now = get_now()
+    day = now.weekday()
+    lessons = SCHEDULE[day]
+    if not lessons:
+        return "weekend", None, None
+    current_time = now.time()
+    first_start = lesson_start_time(0).time()
+    if current_time < first_start:
+        return "before_school", None, None
+    for i, lesson in enumerate(lessons):
+        ls = lesson_start_time(i).time()
+        le = lesson_end_time(i).time()
+        # Время перемены
+        break_end = (lesson_end_time(i) + timedelta(minutes=BREAK_DURATION)).time()
+        if ls <= current_time < le:
+            return "lesson", i, lesson
+        if i < len(lessons) - 1 and le <= current_time < break_end:
+            return "break", i, lessons[i + 1]
+    return "after_school", None, None
+def format_lesson(lesson_str: str) -> tuple:
+    """Разбивает строку 'Предмет / Кабинет' на (предмет, кабинет, эмодзи)."""
+    if " / " in lesson_str:
+        subject, room = lesson_str.split(" / ", 1)
+        emoji = SUBJECT_EMOJIS.get(subject, "📚")
+        return subject, room, emoji
+    return lesson_str, "—", "📚"
+def get_weighted_score() -> int:
+    weights = {1: 5, 2: 8, 3: 12, 4: 15, 5: 20,
+               6: 25, 7: 30, 8: 35, 9: 40, 10: 50}
+    pool = []
+    for score, w in weights.items():
+        pool.extend([score] * w)
+    return random.choice(pool)
+# ─────────────────────────────────────────────
+#  ХРАНИЛИЩЕ ЗАМЕТОК
+# ─────────────────────────────────────────────
+NOTES_FILE = "notes.json"
+def load_notes() -> str:
+    if os.path.exists(NOTES_FILE):
+        try:
+            with open(NOTES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("note", "")
+        except Exception:
+            return ""
+    return ""
+def save_notes(note: str):
+    with open(NOTES_FILE, "w", encoding="utf-8") as f:
+        json.dump({"note": note}, f, ensure_ascii=False)
+# ─────────────────────────────────────────────
+#  ЭКРАН АВТОРИЗАЦИИ
+# ─────────────────────────────────────────────
+class LoginScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.attempts = 0
+        self.blocked_until = 0
+        self._build_ui()
+    def _build_ui(self):
+        layout = MDBoxLayout(
+            orientation="vertical",
+            padding=[32, 80, 32, 32],
+            spacing=24,
+        )
+        # Логотип / заголовок
+        layout.add_widget(MDLabel(
+            text="🔐 Школьный дневник",
+            halign="center",
+            font_style="H5",
+            theme_text_color="Primary",
+            size_hint_y=None,
+            height=60,
+        ))
+        layout.add_widget(MDLabel(
+            text="Введите пароль для входа",
+            halign="center",
+            theme_text_color="Secondary",
+            size_hint_y=None,
+            height=40,
+        ))
+        # Поле пароля
+        self.password_field = MDTextField(
+            hint_text="Пароль",
+            password=True,
+            mode="rectangle",
+            size_hint_x=1,
+            icon_right="eye-off",
+        )
+        layout.add_widget(self.password_field)
+        # Сообщение об ошибке
+        self.error_label = MDLabel(
+            text="",
+            halign="center",
+            theme_text_color="Error",
+            size_hint_y=None,
+            height=40,
+        )
+        layout.add_widget(self.error_label)
+        # Кнопка входа
+        btn = MDRaisedButton(
+            text="ВОЙТИ",
+            size_hint_x=1,
+            height=56,
+            md_bg_color=MDApp.get_running_app().theme_cls.primary_color
+            if MDApp.get_running_app() else (0.2, 0.6, 1, 1),
+        )
+        btn.bind(on_release=self.check_password)
+        layout.add_widget(btn)
+        # Позволяем нажать Enter
+        self.password_field.bind(
+            on_text_validate=self.check_password
+        )
+        self.add_widget(layout)
+    def check_password(self, *_):
+        now = time.time()
+        # Проверка блокировки
+        if self.blocked_until > now:
+            remaining = int(self.blocked_until - now)
+            m, s = divmod(remaining, 60)
+            self.error_label.text = f"🚫 Заблокировано на {m}м {s}с"
+            return
+        entered = self.password_field.text.strip()
+        if entered == PASSWORD:
+            self.attempts = 0
+            self.error_label.text = ""
+            self.password_field.text = ""
+            MDApp.get_running_app().go_to_main()
+        else:
+            self.attempts += 1
+            remaining_attempts = AUTH_MAX_ATTEMPTS - self.attempts
+            if self.attempts >= AUTH_MAX_ATTEMPTS:
+                self.blocked_until = now + AUTH_BLOCK_TIME
+                m = AUTH_BLOCK_TIME // 60
+                self.error_label.text = f"🚫 Заблокировано на {m} минут"
+                self.attempts = 0
+            else:
+                self.error_label.text = (
+                    f"❌ Неверный пароль! Осталось попыток: {remaining_attempts}"
+                )
+            self.password_field.text = ""
+# ─────────────────────────────────────────────
+#  ВСПОМОГАТЕЛЬНЫЕ ВИДЖЕТЫ
+# ─────────────────────────────────────────────
+def info_card(text: str, icon: str = "information") -> MDCard:
+    """Карточка с текстом — используется во всех вкладках."""
+    card = MDCard(
+        orientation="vertical",
+        padding=[16, 12, 16, 12],
+        spacing=8,
+        elevation=2,
+        radius=[12],
+        size_hint_y=None,
+    )
+    label = MDLabel(
+        text=text,
+        theme_text_color="Primary",
+        adaptive_height=True,
+    )
+    card.add_widget(label)
+    card.bind(minimum_height=card.setter("height"))
+    return card
+# ─────────────────────────────────────────────
+#  ВКЛАДКА: РАСПИСАНИЕ
+# ─────────────────────────────────────────────
+class ScheduleTab(MDBottomNavigationItem):
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="schedule",
+            text="Расписание",
+            icon="calendar-clock",
+            **kwargs,
+        )
+        self._built = False
+        self._clock_event = None
+    def on_tab_press(self):
+        if not self._built:
+            self._build_ui()
+            self._built = True
+        self._update()
+    def _build_ui(self):
+        root = MDBoxLayout(orientation="vertical")
+        toolbar = MDTopAppBar(title="📅 Расписание")
+        root.add_widget(toolbar)
+        scroll = MDScrollView()
+        self.content = MDBoxLayout(
+            orientation="vertical",
+            padding=[12, 12, 12, 12],
+            spacing=12,
+            adaptive_height=True,
+        )
+        scroll.add_widget(self.content)
+        root.add_widget(scroll)
+        self.add_widget(root)
+        # Автообновление каждые 30 секунд
+        self._clock_event = Clock.schedule_interval(
+            lambda _: self._update(), 30
+        )
+    def _update(self):
+        self.content.clear_widgets()
+        now = get_now()
+        day = now.weekday()
+        # ── Текущий урок ──────────────────────────
+        status, idx, lesson_str = get_current_lesson_info()
+        current_text = self._format_current(status, idx, lesson_str, now)
+        self.content.add_widget(info_card(current_text))
+        # ── Следующий урок ────────────────────────
+        next_text = self._format_next(status, idx, day, now)
+        self.content.add_widget(info_card(next_text))
+        # ── Сегодняшние уроки ─────────────────────
+        self.content.add_widget(MDLabel(
+            text=f"  {DAY_EMOJIS[day]} Сегодня — {DAY_NAMES[day]}",
+            font_style="Subtitle1",
+            theme_text_color="Primary",
+            size_hint_y=None,
+            height=40,
+        ))
+        lessons = SCHEDULE[day]
+        if not lessons:
+            self.content.add_widget(info_card("🎉 Сегодня выходной! Отдыхай."))
+        else:
+            for i, lesson_s in enumerate(lessons):
+                subj, room, emoji = format_lesson(lesson_s)
+                ls = lesson_start_time(i)
+                le = lesson_end_time(i)
+                text = (
+                    f"{emoji} {subj}\n"
+                    f"  🚪 Каб. {room}   🕐 {ls.strftime('%H:%M')}–{le.strftime('%H:%M')}"
+                )
+                card = info_card(text)
+                # Подсветим текущий урок
+                if status == "lesson" and idx == i:
+                    card.md_bg_color = (0.2, 0.7, 0.3, 0.15)
+                self.content.add_widget(card)
+    # ── helpers ──────────────────────────────────
+    def _format_current(self, status, idx, lesson_str, now) -> str:
+        header = "⏰ Текущий урок\n"
+        if status == "before_school":
+            return header + "📅 Уроки ещё не начались\n🕐 Первый урок в 08:00"
+        if status == "weekend":
+            return header + "🎉 Сегодня выходной! Можно отдохнуть."
+        if status == "after_school":
+            return header + "🏫 Уроки уже закончились."
+        if status == "lesson" and lesson_str:
+            subj, room, emoji = format_lesson(lesson_str)
+            le = lesson_end_time(idx)
+            return (
+                f"{header}🔔 Урок {idx + 1}:\n"
+                f"{emoji} {subj}\n"
+                f"🚪 Каб. {room}\n"
+                f"⏱ До звонка: до {le.strftime('%H:%M')}"
+            )
+        if status == "break" and lesson_str:
+            subj, room, emoji = format_lesson(lesson_str)
+            ls = lesson_start_time(idx + 1) if idx is not None else None
+            time_str = ls.strftime('%H:%M') if ls else "—"
+            return (
+                f"{header}🔄 Сейчас перемена\n"
+                f"➡️ Следующий: {emoji} {subj}\n"
+                f"🚪 Каб. {room}   🕐 Начало в {time_str}"
+            )
+        return header + "Не удалось определить."
+    def _format_next(self, status, idx, day, now) -> str:
+        header = "➡️ Следующий урок\n"
+        lessons = SCHEDULE[day]
+        if status == "weekend" or not lessons:
+            tmr_day = (day + 1) % 7
+            tmr_lessons = SCHEDULE[tmr_day]
+            if tmr_lessons:
+                subj, room, emoji = format_lesson(tmr_lessons[0])
+                return (
+                    f"{header}🎉 Сегодня выходной!\n"
+                    f"Завтра ({DAY_NAMES[tmr_day]}):\n"
+                    f"{emoji} {subj} 🚪{room} в 08:00"
+                )
+            return header + "🎉 Завтра тоже выходной!"
+        if status == "before_school":
+            subj, room, emoji = format_lesson(lessons[0])
+            return f"{header}📅 Первый урок сегодня:\n{emoji} {subj}\n🚪 Каб. {room}  🕐 08:00"
+        if status == "lesson" and idx is not None:
+            next_idx = idx + 1
+            if next_idx < len(lessons):
+                subj, room, emoji = format_lesson(lessons[next_idx])
+                ls = lesson_start_time(next_idx)
+                return (
+                    f"{header}📅 Урок {next_idx + 1}:\n"
+                    f"{emoji} {subj}\n"
+                    f"🚪 Каб. {room}  🕐 {ls.strftime('%H:%M')}"
+                )
+            return header + "🏫 Больше уроков сегодня нет."
+        if status == "break" and idx is not None:
+            next_idx = idx + 1
+            if next_idx < len(lessons):
+                subj, room, emoji = format_lesson(lessons[next_idx])
+                ls = lesson_start_time(next_idx)
+                return (
+                    f"{header}📅 Урок {next_idx + 1}:\n"
+                    f"{emoji} {subj}\n"
+                    f"🚪 Каб. {room}  🕐 {ls.strftime('%H:%M')}"
+                )
+        if status == "after_school":
+            tmr_day = (day + 1) % 7
+            tmr_lessons = SCHEDULE[tmr_day]
+            if tmr_lessons:
+                subj, room, emoji = format_lesson(tmr_lessons[0])
+                return (
+                    f"{header}Завтра ({DAY_NAMES[tmr_day]}):\n"
+                    f"{emoji} {subj} 🚪{room}  🕐 08:00"
+                )
+            return header + "🎉 Завтра выходной!"
+        return header + "Нет данных."
+# ─────────────────────────────────────────────
+#  ВКЛАДКА: ЗАМЕТКИ
+# ─────────────────────────────────────────────
+class NotesTab(MDBottomNavigationItem):
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="notes",
+            text="Заметки",
+            icon="note-text",
+            **kwargs,
+        )
+        self._built = False
+        self._edit_dialog = None
+    def on_tab_press(self):
+        if not self._built:
+            self._build_ui()
+            self._built = True
+        self._refresh()
+    def _build_ui(self):
+        root = MDBoxLayout(orientation="vertical")
+        toolbar = MDTopAppBar(
+            title="📝 Мои заметки",
+            right_action_items=[["plus", lambda _: self._open_editor(append=False)]],
+        )
+        root.add_widget(toolbar)
+        scroll = MDScrollView()
+        self.content = MDBoxLayout(
+            orientation="vertical",
+            padding=[12, 12, 12, 12],
+            spacing=12,
+            adaptive_height=True,
+        )
+        scroll.add_widget(self.content)
+        root.add_widget(scroll)
+        # Кнопки внизу
+        btn_row = MDBoxLayout(
+            size_hint_y=None,
+            height=60,
+            padding=[12, 6, 12, 6],
+            spacing=8,
+        )
+        btn_new = MDRaisedButton(
+            text="✏️ Новая заметка",
+            size_hint_x=0.5,
+        )
+        btn_new.bind(on_release=lambda _: self._open_editor(append=False))
+        btn_add = MDRaisedButton(
+            text="➕ Дополнить",
+            size_hint_x=0.5,
+        )
+        btn_add.bind(on_release=lambda _: self._open_editor(append=True))
+        btn_del = MDFlatButton(
+            text="🗑️ Удалить",
+            theme_text_color="Error",
+        )
+        btn_del.bind(on_release=self._confirm_delete)
+        btn_row.add_widget(btn_new)
+        btn_row.add_widget(btn_add)
+        btn_row.add_widget(btn_del)
+        root.add_widget(btn_row)
+        self.add_widget(root)
+    def _refresh(self):
+        self.content.clear_widgets()
+        note = load_notes()
+        if note:
+            self.content.add_widget(MDLabel(
+                text="💭 Твоя заметка:",
+                font_style="Subtitle1",
+                size_hint_y=None,
+                height=36,
+            ))
+            self.content.add_widget(info_card(f"📄 {note}"))
+        else:
+            self.content.add_widget(MDLabel(
+                text="📄 Заметок пока нет\n\n✨ Нажми «✏️ Новая заметка»!",
+                halign="center",
+                theme_text_color="Secondary",
+                size_hint_y=None,
+                height=120,
+            ))
+    def _open_editor(self, append: bool):
+        current = load_notes()
+        self._append_mode = append
+        self._input_field = MDTextField(
+            hint_text="Введи текст заметки...",
+            multiline=True,
+            mode="rectangle",
+            text=current if append else "",
+        )
+        self._edit_dialog = MDDialog(
+            title="📝 Дополнить заметку" if append else "✏️ Новая заметка",
+            type="custom",
+            content_cls=self._input_field,
+            buttons=[
+                MDFlatButton(
+                    text="ОТМЕНА",
+                    on_release=lambda _: self._edit_dialog.dismiss(),
+                ),
+                MDRaisedButton(
+                    text="СОХРАНИТЬ",
+                    on_release=self._save_note,
+                ),
+            ],
+        )
+        self._edit_dialog.open()
+    def _save_note(self, *_):
+        text = self._input_field.text.strip()
+        if not text:
+            Snackbar(text="⚠️ Пустая заметка не сохранена").open()
+            return
+        if self._append_mode:
+            current = load_notes()
+            text = f"{current}\n\n✨ {text}" if current else text
+        save_notes(text)
+        self._edit_dialog.dismiss()
+        self._refresh()
+        Snackbar(text="✅ Заметка сохранена!").open()
+    def _confirm_delete(self, *_):
+        if not load_notes():
+            Snackbar(text="📄 Нечего удалять").open()
+            return
+        dialog = MDDialog(
+            title="🗑️ Удалить заметку?",
+            text="Это действие нельзя отменить.",
+            buttons=[
+                MDFlatButton(
+                    text="ОТМЕНА",
+                    on_release=lambda d: dialog.dismiss(),
+                ),
+                MDRaisedButton(
+                    text="УДАЛИТЬ",
+                    on_release=lambda d: self._delete_note(dialog),
+                ),
+            ],
+        )
+        dialog.open()
+    def _delete_note(self, dialog):
+        save_notes("")
+        dialog.dismiss()
+        self._refresh()
+        Snackbar(text="🗑️ Заметка удалена").open()
+# ─────────────────────────────────────────────
+#  ВКЛАДКА: ДОПОЛНИТЕЛЬНО
+# ─────────────────────────────────────────────
+class ExtraTab(MDBottomNavigationItem):
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="extra",
+            text="Доп.",
+            icon="star-outline",
+            **kwargs,
+        )
+        self._built = False
+        self._score_cd = 0          # timestamp последнего использования
+        self._score_unlimited = False
+        self._last_got_cd = False   # флаг для секрет-команды ggcd
+    def on_tab_press(self):
+        if not self._built:
+            self._build_ui()
+            self._built = True
+    def _build_ui(self):
+        root = MDBoxLayout(orientation="vertical")
+        toolbar = MDTopAppBar(title="✨ Дополнительно")
+        root.add_widget(toolbar)
+        scroll = MDScrollView()
+        self.content = MDBoxLayout(
+            orientation="vertical",
+            padding=[12, 12, 12, 12],
+            spacing=16,
+            adaptive_height=True,
+        )
+        scroll.add_widget(self.content)
+        root.add_widget(scroll)
+        self.add_widget(root)
+        self._build_sections()
+    def _build_sections(self):
+        self.content.clear_widgets()
+        # ── Столовая ──────────────────────────────
+        self.content.add_widget(MDLabel(
+            text="🍽️ Столовая",
+            font_style="H6",
+            size_hint_y=None, height=40,
+        ))
+        self.content.add_widget(info_card(self._cafeteria_text()))
+        # ── Каникулы ──────────────────────────────
+        self.content.add_widget(MDLabel(
+            text="📅 Каникулы 2025–2026",
+            font_style="H6",
+            size_hint_y=None, height=40,
+        ))
+        self.content.add_widget(info_card(self._vacations_text()))
+        # ── Баллы ─────────────────────────────────
+        self.content.add_widget(MDLabel(
+            text="📊 Узнать свой балл",
+            font_style="H6",
+            size_hint_y=None, height=40,
+        ))
+        self.score_result_label = MDLabel(
+            text="Нажми кнопку, чтобы узнать свой балл!",
+            theme_text_color="Secondary",
+            adaptive_height=True,
+            size_hint_y=None,
+        )
+        self.content.add_widget(self.score_result_label)
+        score_btn = MDRaisedButton(
+            text="🎲 Получить балл",
+            size_hint_x=1,
+            height=52,
+        )
+        score_btn.bind(on_release=self._handle_score)
+        self.content.add_widget(score_btn)
+        # Поле секрет-команды (скрытое — просто TextField внизу)
+        self._secret_field = MDTextField(
+            hint_text="...",
+            mode="rectangle",
+            size_hint_y=None,
+            height=48,
+            opacity=0.0,          # невидимый, но кликабельный
+        )
+        self._secret_field.bind(on_text_validate=self._handle_secret)
+        self.content.add_widget(self._secret_field)
+    # ── Столовая ──────────────────────────────────
+    def _cafeteria_text(self) -> str:
+        status, idx, _ = get_current_lesson_info()
+        now = get_now()
+        day = now.weekday()
+        lessons = SCHEDULE[day]
+        if not lessons:
+            return "🎉 Сегодня нет уроков\n🍴 Столовая не работает"
+        if status == "after_school":
+            return "🏫 Уроки закончились\n🍴 Столовая, скорее всего, закрыта"
+        cafeteria_after = 4   # после 4-го урока (1-индекс)
+        café_idx = cafeteria_after - 1   # 0-индекс
+        if status == "before_school":
+            ls = lesson_start_time(café_idx)
+            return (
+                f"🕐 Первый урок в 08:00\n"
+                f"🍛 Обед после {cafeteria_after}-го урока\n"
+                f"🕐 Примерно в {ls.strftime('%H:%M')}"
+            )
+        if idx is not None and idx < café_idx:
+            ls = lesson_start_time(café_idx)
+            diff = ls - now
+            mins = int(diff.total_seconds() // 60)
+            return (
+                f"📚 Сейчас {idx + 1}-й урок\n"
+                f"🍴 До столовой осталось ~{mins} мин\n"
+                f"🕐 Откроется в {ls.strftime('%H:%M')}"
+            )
+        if idx is not None and idx == café_idx:
+            return "🍴 Самое время обедать!\n🍛 Иди в столовую!"
+        return "🍴 Столовая уже была\n🍛 Обед прошёл после 4-го урока"
+    # ── Каникулы ──────────────────────────────────
+    def _vacations_text(self) -> str:
+        today = get_now().date()
+        result = ""
+        nearest_name = None
+        nearest_days = float("inf")
+        for name, info in VACATIONS.items():
+            start = info["start"].date()
+            end = info["end"].date()
+            days = info["days"]
+            is_current = start <= today <= end
+            days_to = (start - today).days
+            status_icon = "✅" if is_current else ("⏳" if days_to > 0 else "✔️")
+            result += f"{status_icon} {name}: {start.strftime('%d.%m')}–{end.strftime('%d.%m')} ({days} дн.)\n"
+            if days_to > 0 and days_to < nearest_days:
+                nearest_days = days_to
+                nearest_name = name
+        if nearest_name:
+            result += f"\n🎯 Ближайшие: {nearest_name}\n⏰ Осталось {nearest_days} дн."
+        else:
+            result += "\n🎓 Следующие каникулы не найдены"
+        return result.strip()
+    # ── Баллы ─────────────────────────────────────
+    def _handle_score(self, *_):
+        now = time.time()
+        cd = 60  # секунд
+        if not self._score_unlimited and (now - self._score_cd) < cd:
+            remaining = int(cd - (now - self._score_cd))
+            self.score_result_label.text = (
+                f"⏳ Кулдаун! Попробуй через {remaining} сек."
+            )
+            self._last_got_cd = True
+            # Показываем секрет-поле как намёк на секрет
+            self._secret_field.opacity = 0.0
+            return
+        self._last_got_cd = False
+        self._score_cd = now
+        score = get_weighted_score()
+        jokes = SCORE_JOKES.get(score, [f"🎲 Твой балл: {score}"])
+        self.score_result_label.text = random.choice(jokes)
+    def _handle_secret(self, field):
+        text = field.text.strip().lower()
+        field.text = ""
+        if text == "ggcd" and self._last_got_cd:
+            self._score_unlimited = True
+            self._last_got_cd = False
+            self.score_result_label.text = (
+                "🔓 СЕКРЕТ АКТИВИРОВАН!\n"
+                "✅ Кулдаун снят навсегда!\n"
+                "🎮 Жми сколько угодно!"
+            )
+            Snackbar(text="🔓 Кулдаун снят навсегда!").open()
+# ─────────────────────────────────────────────
+#  ВКЛАДКА: О СЕБЕ
+# ─────────────────────────────────────────────
+class AboutTab(MDBottomNavigationItem):
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="about",
+            text="О себе",
+            icon="account-circle",
+            **kwargs,
+        )
+        self._built = False
+    def on_tab_press(self):
+        if not self._built:
+            self._build_ui()
+            self._built = True
+    def _build_ui(self):
+        root = MDBoxLayout(orientation="vertical")
+        toolbar = MDTopAppBar(title="ℹ️ About • Кирюша")
+        root.add_widget(toolbar)
+        scroll = MDScrollView()
+        content = MDBoxLayout(
+            orientation="vertical",
+            padding=[16, 16, 16, 16],
+            spacing=16,
+            adaptive_height=True,
+        )
+        scroll.add_widget(content)
+        root.add_widget(scroll)
+        self.add_widget(root)
+        about_text = (
+            "☁️ ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ\n"
+            "════════════════\n\n"
+            "💻 ᴅᴇᴠ:\n"
+            "👤 ᴋɪʀɪʟʟ\n"
+            "🖤 16 ʏ.ᴏ.\n"
+            "📍 ʜʀᴏᴅɴᴀ, ʙᴇʟᴀʀᴜꜱ\n"
+            "🎮 ᴅᴏᴛᴀ 2 ᴘʟᴀʏᴇʀ\n\n"
+            "⚙️ ꜱᴛᴀᴄᴋ:\n"
+            "🐍 ᴘʏᴛʜᴏɴ 3.11+\n"
+            "📱 ᴋɪᴠʏᴍᴅ\n\n"
+            "🗨️ ꜱᴏᴄɪᴀʟꜱ:\n"
+            "ᴛᴇʟᴇɢʀᴀᴍ — @kiritomr\n"
+            "ᴛɪᴋᴛᴏᴋ — ʙᴇᴢᴘʀɪᴄᴇʟᴀ\n"
+            "ꜱᴛᴇᴀᴍ — [tinyurl.com](https://tinyurl.com/ggmarlboro\n\n)"
+            "ᴠᴇʀꜱɪᴏɴ // 1.0.0 (ᴀɴᴅʀᴏɪᴅ)\n\n"
+            "По вопросам: @kiritomr"
+        )
+        content.add_widget(info_card(about_text))
+# ─────────────────────────────────────────────
+#  ГЛАВНЫЙ ЭКРАН (Bottom Navigation)
+# ─────────────────────────────────────────────
+class MainScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        nav = MDBottomNavigation(panel_color=(0.12, 0.12, 0.18, 1))
+        nav.add_widget(ScheduleTab())
+        nav.add_widget(NotesTab())
+        nav.add_widget(ExtraTab())
+        nav.add_widget(AboutTab())
+        self.add_widget(nav)
+# ─────────────────────────────────────────────
+#  ПРИЛОЖЕНИЕ
+# ─────────────────────────────────────────────
+class SchoolApp(MDApp):
+    def build(self):
+        self.theme_cls.theme_style = "Dark"
+        self.theme_cls.primary_palette = "Blue"
+        self.theme_cls.accent_palette = "Teal"
+        self.sm = ScreenManager(transition=SlideTransition())
+        self.sm.add_widget(LoginScreen(name="login"))
+        self.sm.add_widget(MainScreen(name="main"))
+        self.sm.current = "login"
+        return self.sm
+    def go_to_main(self):
+        self.sm.current = "main"
+if __name__ == "__main__":
+    SchoolApp().run()
+buildozer.spec (минимальный для сборки APK)
+ini
+
+
+[app]
+title = Школьный дневник
+package.name = schooldiary
+package.domain = org.kirill
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas,json
+version = 1.0.0
+requirements = python3,kivy==2.3.0,kivymd==1.2.0
+orientation = portrait
+fullscreen = 0
+android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+android.minapi = 21
+android.ndk = 25b
+android.sdk = 33
+[buildozer]
+log_level = 2
+Как запустить / собрать
+Тест на ПК:
+
+bash
+
+
+pip install kivy kivymd
+python main.py
+Сборка APK (Linux / WSL / GitHub Actions):
+
+bash
+
+
+pip install buildozer
+buildozer android debug
+# APK будет в ./bin/
+Что где реализовано
+Функция	Где
+Экран пароля + блокировка	LoginScreen
+Текущий / следующий урок (автообновление 30 с)	ScheduleTab._update()
+Все уроки дня с временами	ScheduleTab._update()
+Заметки в JSON (persistent)	NotesTab + load_notes/save_notes
+Столовая / каникулы	ExtraTab
+Баллы с кулдауном	ExtraTab._handle_score()
+Секрет ggcd	ExtraTab._handle_secret() — невидимое поле, активируется после CD
+О себе	AboutTab
+Секрет ggcd: сначала нажми «Получить балл» и получи сообщение о кулдауне, затем нажми на невидимое поле внизу раздела «Дополнительно», напечатай ggcd и нажми Enter.
