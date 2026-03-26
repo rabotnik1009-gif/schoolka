@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build Android APK (EAS)
+    name: Build Android APK (local)
     runs-on: ubuntu-latest
 
     steps:
@@ -26,46 +26,38 @@ jobs:
         with:
           version: 10
 
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: pnpm install
 
-      - name: Setup Expo / EAS CLI
-        run: npm install -g eas-cli
+      - name: Install Expo CLI
+        run: npm install -g @expo/cli
 
-      - name: Build APK via EAS and download
+      - name: Generate Android native project
         working-directory: artifacts/school-diary
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          BUILD_JSON=$(eas build \
-            --platform android \
-            --profile preview \
-            --non-interactive \
-            --json \
-            --no-wait 2>/dev/null)
-          BUILD_ID=$(echo "$BUILD_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
-          echo "Build ID: $BUILD_ID"
-          echo "Waiting for build to finish..."
-          eas build:view "$BUILD_ID" --json > /dev/null
-          while true; do
-            STATUS=$(eas build:view "$BUILD_ID" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
-            echo "Status: $STATUS"
-            if [ "$STATUS" = "FINISHED" ]; then
-              APK_URL=$(eas build:view "$BUILD_ID" --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('artifacts',{}).get('buildUrl',''))")
-              echo "APK URL: $APK_URL"
-              curl -L "$APK_URL" -o school-diary.apk
-              echo "Downloaded APK"
-              break
-            elif [ "$STATUS" = "ERRORED" ] || [ "$STATUS" = "CANCELED" ]; then
-              echo "Build failed with status: $STATUS"
-              exit 1
-            fi
-            sleep 30
-          done
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Install Android dependencies
+        working-directory: artifacts/school-diary
+        run: pnpm install
+
+      - name: Build APK
+        working-directory: artifacts/school-diary/android
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: school-diary-apk
-          path: artifacts/school-diary/school-diary.apk
+          path: artifacts/school-diary/android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
