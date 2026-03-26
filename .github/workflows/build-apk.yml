@@ -51,8 +51,16 @@ jobs:
         working-directory: artifacts/school-diary
         run: pnpm install --no-frozen-lockfile
 
+      - name: Embed JS bundle into APK
+        working-directory: artifacts/school-diary
+        run: |
+          echo "bundleInDebug=true" >> android/gradle.properties
+          echo "EXPO_PUBLIC_DOMAIN=" >> android/gradle.properties
+
       - name: Build APK
         working-directory: artifacts/school-diary/android
+        env:
+          NODE_ENV: production
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK artifact
